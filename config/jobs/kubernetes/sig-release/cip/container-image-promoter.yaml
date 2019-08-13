@@ -25,3 +25,30 @@ presubmits:
           # /home/prow/go/src/github.com/{{.Org}}/{{.Repo}}, so just '.' should
           # suffice, but it's nice to be explicit.
           value: "/home/prow/go/src/github.com/kubernetes/k8s.io"
+  kubernetes-sigs/k8s-container-image-promoter:
+  - name: pull-cip-e2e
+    decorate: true
+    skip_report: false
+    # Because we run e2e tests, we cannot run more than 1 instance at a time
+    # (the e2e test resources are not isolated across test runs).
+    max_concurrency: 1
+    branches:
+    - ^master$
+    spec:
+      containers:
+      - image: gcr.io/cip-demo-staging/cip-e2e-env:20190813-v2.1.2-70-gff99d6e
+        command:
+        - make
+        args:
+        - test-e2e
+        env:
+        - name: CIP_E2E_KEY_FILE
+          value: "/etc/k8s-cip-test-prod-service-account/service-account.json"
+        volumeMounts:
+        - name: k8s-cip-test-prod-service-account-creds
+          mountPath: /etc/k8s-cip-test-prod-service-account
+          readOnly: true
+      volumes:
+      - name: k8s-cip-test-prod-service-account-creds
+        secret:
+          secretName: k8s-cip-test-prod-service-account
