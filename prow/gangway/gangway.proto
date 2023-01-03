@@ -13,15 +13,16 @@ service Prow {
   // https://docs.google.com/document/d/1v77jp1Nb5C2C2-PdV02SGViO9CyZ9SvNxCPOHyIUQeo/edit#bookmark=id.q68srxklvpt4.
   rpc CreateJobExecution(CreateJobExecutionRequest) returns (JobExecution) {
     option (google.api.http) = {
-      post: "/v1/executions"
-      body: "execution"
+      post: "/v1/executions/{job_name}"
+      body: "*"  // See
+                 // https://cloud.google.com/endpoints/docs/grpc/transcoding#use_wildcard_in_body
     };
   }
   rpc GetJobExecution(GetJobExecutionRequest) returns (JobExecution) {
     // Client example:
     //   curl http://DOMAIN_NAME/v1/executions/1
     option (google.api.http) = {
-      get: "/v1/executions/{execution}"
+      get: "/v1/executions/{id}"
     };
   }
   rpc ListJobExecutions(ListJobExecutionsRequest) returns (JobExecutions) {
