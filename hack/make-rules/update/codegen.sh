@@ -298,6 +298,17 @@ gen-all-proto-stubs(){
     -print0 | sort -z)
 }
 
+gen-gangway-apidescriptorpb-for-cloud-endpoints(){
+  "${REPO_ROOT}/_bin/protoc/bin/protoc" \
+    "--proto_path=${REPO_ROOT}/_bin/protoc/include/google/protobuf" \
+    "--proto_path=${REPO_ROOT}/_bin/protoc/include/googleapis" \
+    "--proto_path=${REPO_ROOT}/prow/gangway" \
+    --include_imports \
+    --include_source_info \
+    --descriptor_set_out prow/gangway/api_descriptor.pb \
+    gangway.proto
+}
+
 gen-prow-config-documented
 
 export GO111MODULE=off
@@ -320,3 +331,4 @@ gen-prowjob-crd
 export GO111MODULE=on
 
 gen-all-proto-stubs
+gen-gangway-apidescriptorpb-for-cloud-endpoints
