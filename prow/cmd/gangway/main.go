@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -37,7 +38,9 @@ import (
 	prowflagutil "k8s.io/test-infra/prow/flagutil"
 	configflagutil "k8s.io/test-infra/prow/flagutil/config"
 	"k8s.io/test-infra/prow/gangway"
+	"k8s.io/test-infra/prow/interrupts"
 	"k8s.io/test-infra/prow/logrusutil"
+	"k8s.io/test-infra/prow/pjutil"
 )
 
 type options struct {
@@ -76,6 +79,10 @@ func (o *options) validate() error {
 		}
 	}
 
+	if o.port == o.instrumentationOptions.HealthPort {
+		errs = append(errs, fmt.Errorf("both the gRPC port and health port are using the same port number %d", o.port))
+	}
+
 	return utilerrors.NewAggregate(errs)
 }
 
@@ -90,6 +97,43 @@ func (c *kubeClient) Create(ctx context.Context, job *prowcr.ProwJob, o metav1.C
 		return job, nil
 	}
 	return c.client.Create(ctx, job, o)
+}
+
+// interruptableServer is a wrapper type around the gRPC server, so that we can
+// pass it along to our own interrupts package.
+type interruptableServer struct {
+	grpcServer *grpc.Server
+	listener   net.Listener
+	port       int
+}
+
+// Shutdown shuts down the inner gRPC server as gracefully as possible, by first
+// invoking GracefulStop() on it. This gives the server time to try to handle
+// things gracefully internally. However if it takes too long (if the parent
+// context cancels us), we forcefully kill the server by calling Stop(). Stop()
+// interrupts GracefulStop() (see
+// https://pkg.go.dev/google.golang.org/grpc#Server.Stop).
+func (s *interruptableServer) Shutdown(ctx context.Context) error {
+
+	gracefulStopFinished := make(chan struct{})
+
+	go func() {
+		s.grpcServer.GracefulStop()
+		close(gracefulStopFinished)
+	}()
+
+	select {
+	case <-gracefulStopFinished:
+		return nil
+	case <-ctx.Done():
+		s.grpcServer.Stop()
+		return ctx.Err()
+	}
+}
+
+func (s *interruptableServer) ListenAndServe() error {
+	logrus.Infof("serving gRPC on port %d", s.port)
+	return s.grpcServer.Serve(s.listener)
 }
 
 func main() {
@@ -132,26 +176,41 @@ func main() {
 		logrus.WithError(err).Fatal("Error creating InRepoConfigCacheGetter.")
 	}
 
+	// Start serving liveness endpoint /healthz.
+	health := pjutil.NewHealthOnPort(o.instrumentationOptions.HealthPort)
+
 	gw := gangway.Gangway{
 		ConfigAgent:              configAgent,
 		ProwJobClient:            kubeClient,
 		InRepoConfigCacheHandler: cacheGetter,
 	}
 
-	logrus.Infof("serving gRPC on port %d", o.port)
-
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(o.port))
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to set up tcp connection")
 	}
+
+	// Create a new gRPC (empty) server, and wire it up to act as a "ProwServer"
+	// as defined in the auto-generated gangway_grpc.pb.go file.
 	grpcServer := grpc.NewServer()
 	gangway.RegisterProwServer(grpcServer, &gw)
-	// FIXME (listx): Use interrupts package to ensure graceful termination. See
-	// https://github.com/kubernetes/test-infra/pull/28036#discussion_r1050190501.
+
 	// Register reflection service on gRPC server. This enables testing through
 	// clients that don't have the generated stubs baked in, such as grpcurl.
 	reflection.Register(grpcServer)
-	if err := grpcServer.Serve(lis); err != nil {
-		logrus.WithError(err).Fatal("failed to set up grpc server")
+
+	s := &interruptableServer{
+		grpcServer: grpcServer,
+		listener:   lis,
+		port:       o.port,
 	}
+
+	// Start serving readiness endpoint /healthz/ready.
+	health.ServeReady()
+
+	// Start serving requests! Note that ListenAndServe() does not block, while
+	// WaitForGracefulShutdown() does block.
+	interrupts.ListenAndServe(s, o.gracePeriod)
+	interrupts.WaitForGracefulShutdown()
+	logrus.Info("Ended gracefully")
 }
