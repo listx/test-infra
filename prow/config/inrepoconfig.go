@@ -137,7 +137,9 @@ func prowYAMLGetter(
 	}
 
 	timeBeforeClone := time.Now()
-	repo, err := gc.ClientForWithRepoOpts(orgRepo.Org, orgRepo.Repo, inrepoconfigRepoOpts)
+	repoOpts := inrepoconfigRepoOpts
+	repoOpts.FetchCommits = append(headSHAs, baseSHA)
+	repo, err := gc.ClientForWithRepoOpts(orgRepo.Org, orgRepo.Repo, repoOpts)
 	inrepoconfigMetrics.gitCloneDuration.WithLabelValues(orgRepo.Org, orgRepo.Repo).Observe((float64(time.Since(timeBeforeClone).Seconds())))
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone repo for %q: %w", identifier, err)
@@ -170,33 +172,11 @@ func prowYAMLGetter(
 	}
 
 	log.WithField("merge-strategy", mergeMethod).Debug("Using merge strategy.")
-	if err := ensureCommits(repo, baseSHA, headSHAs...); err != nil {
-		return nil, fmt.Errorf("failed to fetch headSHAs: %v", err)
-	}
 	if err := repo.MergeAndCheckout(baseSHA, string(mergeMethod), headSHAs...); err != nil {
 		return nil, fmt.Errorf("failed to merge: %w", err)
 	}
 
 	return ReadProwYAML(log, repo.Directory(), false)
-}
-
-func ensureCommits(repo git.RepoClient, baseSHA string, headSHAs ...string) error {
-	//Ensure baseSHA exists.
-	if exists, _ := repo.ObjectExists(baseSHA); !exists {
-		if err := repo.Fetch(baseSHA); err != nil {
-			return fmt.Errorf("failed to fetch baseSHA: %s: %v", baseSHA, err)
-		}
-	}
-	//Ensure headSHAs exist
-	for _, sha := range headSHAs {
-		// This is best effort. No need to check for error
-		if exists, _ := repo.ObjectExists(sha); !exists {
-			if err := repo.Fetch(sha); err != nil {
-				return fmt.Errorf("failed to fetch headSHA: %s: %v", sha, err)
-			}
-		}
-	}
-	return nil
 }
 
 // ReadProwYAML parses the .prow.yaml file or .prow directory, no commit checkout or defaulting is included.
