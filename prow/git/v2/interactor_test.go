@@ -472,41 +472,46 @@ func TestInteractor_BranchExists(t *testing.T) {
 	}
 }
 
-func TestInteractor_CommitExists(t *testing.T) {
+func TestInteractor_ObjectExists(t *testing.T) {
 	var testCases = []struct {
 		name          string
+		object        string
 		responses     map[string]execResponse
 		expectedCalls [][]string
 		expectedOut   bool
 		expectedErr   bool
 	}{
 		{
-			name: "happy case",
+			name:   "happy case",
+			object: "abc123",
 			responses: map[string]execResponse{
-				"branch --contains abc123": {out: []byte("")},
+				"cat-file -e abc123": {out: []byte("")},
 			},
 			expectedCalls: [][]string{
-				{"branch", "--contains", "abc123"},
+				{"cat-file", "-e", "abc123"},
 			},
 			expectedOut: true,
 		},
 		{
-			name: "Does not exist",
+			name:   "Does not exist",
+			object: "000000",
 			responses: map[string]execResponse{
-				"branch --contains abc123": {out: []byte(""), err: errors.New("error: no such commit abc123")},
+				"cat-file -e 000000": {out: []byte(""), err: errors.New("")},
 			},
 			expectedCalls: [][]string{
-				{"branch", "--contains", "abc123"},
+				{"cat-file", "-e", "000000"},
 			},
 			expectedOut: false,
+			expectedErr: true,
 		},
 		{
-			name: "error",
+			name:   "error",
+			object: "not-a-sha",
 			responses: map[string]execResponse{
-				"branch --contains abc123": {out: []byte(""), err: errors.New("error: malformed object name abc123")},
+				"cat-file -e not-a-sha": {out: []byte(""), err: errors.New("fatal: Not a valid object name not-a-sha")},
 			},
 			expectedCalls: [][]string{
-				{"branch", "--contains", "abc123"},
+				{"cat-file", "-e", "not-a-sha"},
 			},
 			expectedOut: false,
 			expectedErr: true,
@@ -523,7 +528,7 @@ func TestInteractor_CommitExists(t *testing.T) {
 				executor: &e,
 				logger:   logrus.WithField("test", testCase.name),
 			}
-			actualOut, err := i.CommitExists("abc123")
+			actualOut, err := i.ObjectExists(testCase.object)
 			if err != nil && !testCase.expectedErr {
 				t.Errorf("did not expect error, but got err: %v", err)
 			}

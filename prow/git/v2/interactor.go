@@ -44,8 +44,8 @@ type Interactor interface {
 	RevParse(commitlike string) (string, error)
 	// BranchExists determines if a branch with the name exists
 	BranchExists(branch string) bool
-	// CommitExists determines if the commit SHA exists locally
-	CommitExists(sha string) (bool, error)
+	// ObjectExists determines if the Git object exists locally
+	ObjectExists(sha string) (bool, error)
 	// CheckoutNewBranch creates a new branch from HEAD and checks it out
 	CheckoutNewBranch(branch string) error
 	// Merge merges the commitlike into the current HEAD
@@ -220,16 +220,17 @@ func (i *interactor) BranchExists(branch string) bool {
 	return err == nil
 }
 
-func (i *interactor) CommitExists(sha string) (bool, error) {
-	i.logger.WithField("SHA", sha).Info("Checking if SHA exists")
-	_, err := i.executor.Run("branch", "--contains", sha)
-	if err != nil && strings.Contains(err.Error(), "no such commit") {
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("Unable to check if commit exists: %v", err)
+func (i *interactor) ObjectExists(sha string) (bool, error) {
+	i.logger.WithField("SHA", sha).Info("Checking if Git object exists")
+	output, err := i.executor.Run("cat-file", "-e", sha)
+	// This will only error if the Git object does not exist.
+	if err != nil {
+		if string(output) != "" {
+			i.logger.WithError(err).WithField("SHA", sha).Debug(output)
+		}
+		return false, err
 	}
 	return true, nil
-
 }
 
 // CheckoutNewBranch creates a new branch and checks it out.
